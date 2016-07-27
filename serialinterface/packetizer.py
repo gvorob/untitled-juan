@@ -1,61 +1,13 @@
 import sys
 import time
 import re
-import serial
-import serial.tools.list_ports
 import threading
 import queue
-
-PORT_TIMEOUT = 1
-
-def getPort():
-	#get list of ports
-	ports = serial.tools.list_ports.comports()
+import time
 
 
-	comport = None
-	#get the one we want
-	if len(ports) == 0:
-		raise IOError("No COM port found")
-	elif len(ports) == 1:
-		comport = ports[0]	
-	#query user for input
-	elif len(ports) > 1:
-		#list out
-		for i, port in enumerate(ports):
-			print("{}: {}, {}, {}".format(i, port.device, port.name, port.description))
-		
-		#get response
-		while True:
-			try:
-				desiredPort = int(input('Pick which port you want> '))
-				comport = ports[i]
-				break
-			except (ValueError, IndexError):
-				print("That is not a valid port")
-
-	assert(comport is not None)
-
-	return comport
-
-def openSerialConnection(portURL):
-	"Returns a serial.Serial object, which is file-like"
-
-	portURL = getPort().device
-	print("Opening connection to port " + portURL)
-	serialConn = serial.Serial(portURL, timeout=PORT_TIMEOUT)
-
-	print("Waiting for data...")
-	while not serialConn.in_waiting:
-		#print(serialConn.in_waiting)
-		time.sleep(0.1)
-	print("Connected")
-	print("{} bytes waiting".format(serialConn.in_waiting))
-
-	return serialConn
-
-
-
+#TODO: add packet format customization
+#TODO: expose any exceptions encountered to other threads using this
 class Packetizer():
 	"""Asynchronously polls a file-like object and packetizes it by regex into a Queue"""
 
@@ -69,10 +21,17 @@ class Packetizer():
 	#How many bytes to read each time through
 	AMOUNT_TO_READ = 10 
 
+	#How long to sleep between reads
+	THREADED_SLEEP_TIME = 0.01
+
 	def __init__(self, _conn):
+
+
 		self._inBuffer = b''
 		self.packets = queue.Queue()
-		self.inputRegex = re.compile(b'\xFF(.)\xAA(.)\xAA\x00')
+		#regex newline transmitted as data
+		self.inputRegex = re.compile(b'\xFF(.)\xAA(.)\xAA\x00', 
+									 re.MULTILINE | re.DOTALL)
 
 		self._conn = _conn
 
@@ -98,7 +57,7 @@ class Packetizer():
 			return None, buff
 
 	def readData(self):
-		"Reads a small amount of data from the stream, packetizes if possible, should be called repeatedly"
+		"Reads a small amount of data from the stream, should be called repeatedly"
 
 		#read data
 		bytesRead = self._conn.read(Packetizer.AMOUNT_TO_READ)
@@ -109,6 +68,9 @@ class Packetizer():
 
 		self._inBuffer += bytesRead
 
+
+	def matchData(self):
+		"packetizes as much data as possible from the input buffer"
 
 		#match as much text as we can, 
 		#put the matching capture groups into the packets queue
@@ -124,22 +86,42 @@ class Packetizer():
 				if len(self._inBuffer) < Packetizer.LONGEST_PATTERN:
 					break #wait to read more data
 				
-				#we definitely have enough data, but maybe we're offset wrong
+				#we definitely have enough data, something went wrong
 				else:
-					oldInBuffer = self._inBuffer #hold onto this for error output
+					self.recoverFromInvalidInput()
+					#only returns on success
+	
+	def recoverFromInvalidInput(self):
+		"""Try to recover by discarding some input
 
-					#chomp off 1 char at a time and hope it works
-					for i in range(Packetizer.MAX_OFFSET_RETRIES):
-						self._inBuffer = self._inBuffer[1:]
-						groups, self._inBuffer = Packetizer._tryMatching(self.inputRegex, self._inBuffer)
-						if groups:
-							break #break to main parsing loop
-					if not groups: #we found nothing
-						raise IOError("Invalid data received. Hex: {}".format(repr(oldInBuffer)))
+		We have enough data in the buffer that we should definitely
+		have a full packet. Try discarding one character at a time
+		up to MAX_OFFSET_RETRIES and hope that we match something
+		
+		Else raise IOError
+		"""
 
-					self.packets.put(groups)
+		oldInBuffer = self._inBuffer #hold onto this for error output
+
+		#chomp off 1 char at a time and hope it works
+		print("Invalid serial input, trying to recover by discarding input")
+		for i in range(Packetizer.MAX_OFFSET_RETRIES):
+			print(self._inBuffer)
+			self._inBuffer = self._inBuffer[1:]
+			groups, self._inBuffer = Packetizer._tryMatching(self.inputRegex, self._inBuffer)
+			print(self._inBuffer)
+			print('---')
+			if groups:
+				print("Successfully recovered by discarding " + str(i + 1) + " chars")
+				return #return to main parsing loop
+		if not groups: #we found nothing
+			raise IOError("Invalid data received. Hex: {}".format(repr(oldInBuffer)))
+
+		self.packets.put(groups)
 	
 	def threadRun(self):
+		"Calls readdata repeatedly, to be run from Thread"
 		while True:
 			self.readData()
-			time.sleep(0.01)
+			self.matchData()
+			time.sleep(Packetizer.THREADED_SLEEP_TIME)
