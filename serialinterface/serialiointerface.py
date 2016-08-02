@@ -115,7 +115,7 @@ class SerialIOInterface:
 		self._packetizer.start()
 
 		self.digitals = [DigitalIn() for i in range(4)]
-		self.analogs = [AnalogIn() for i in range(4)]
+		self.analogs = [AnalogIn() for i in range(2)]
 
 
 	def lockFrame(self):
@@ -137,16 +137,20 @@ class SerialIOInterface:
 					print("Error: stale frame (in SerialIOInterface)")
 				break
 
-	def consumePacket(self, p):
+	def consumePacket(self, packet):
 		"""Consume a packet and use it to update its state
 		
 		Packets are tuples of capture groups from packetizer regex"""
-		#print("Consuming packet:", p)
-		stateByte = p[0][0] #first byte of first bytestring
-		stateBits = [bool((stateByte >> i)  & 1) for i in range(8)]
+		#print("Consuming packet:", packet)
 
-		for digital, newState in zip(self.digitals, stateBits):
-			digital.value = newState
+		digitals, analogs = packet
+
+		#set my values to match the packet
+		for i, d in enumerate(digitals):
+			self.digitals[i].value = d
+
+		for i, a in enumerate(analogs):
+			self.analogs[i].value = a
 
 		#print("Button state:", stateBits)
 
@@ -156,8 +160,18 @@ class SerialIOInterface:
 
 
 if __name__ == '__main__':
+	import time
+
 	print("Testing serialiointerface.py")
 
 	#               HDR  ... #D  #A  ... D1-8 SEP A1H A1L A2H A2L CKSM
 	print(MATCHER(b"\xA1\x00\x04\x02\x00\x15\xA2\x00\x00\x03\xFF\xA3"))
 	print("The above should be (([T F T F], [0, 1023]), b'')")
+
+	print("testing it for reals")
+	s = SerialIOInterface()
+
+	while True:
+		s.lockFrame()
+		print(str(s))
+		time.sleep(0.2)
