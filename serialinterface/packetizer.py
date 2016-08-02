@@ -8,6 +8,26 @@ import time
 
 #TODO: add packet format customization
 #TODO: expose any exceptions encountered to other threads using this
+#TODO: improve packet recovery:
+#			If sufficient data and match failed, try discarding one
+#           if data drops below sufficient level, wait for more
+#           only after N discards, raise an error
+
+#DOTALL so that newline char in data dealt with properly
+_OLD_REGEX = re.compile(b'\xFF(.)\xAA(.)\xAA\x00', 
+						  re.MULTILINE | re.DOTALL)
+def OLD_MATCHER(buff):
+	"""Tries to match packet from the start of buff
+	
+	Returns (match, restOfBuff)
+	If failed to match then returns (None, buff)"""
+
+	m = _OLD_REGEX.match(buff)
+	if m:
+		return m.groups(), buff[m.end():]
+	else:
+		return None, buff
+
 class Packetizer():
 	"""Asynchronously polls a file-like object and packetizes it by regex into a Queue"""
 
@@ -23,38 +43,43 @@ class Packetizer():
 
 	#How long to sleep between reads
 	THREADED_SLEEP_TIME = 0.01
+	
 
-	def __init__(self, _conn):
+	def __init__(self, conn, matcher):
+		"""Initializes packetizer
 
+		Reads data from input stream conn.
+		Matches packets off it using matcher.
+
+		Matcher is: (inBuffer) => (oneMatch, restOfBuffer)
+		or (None, restOfBuffer) in case of no match
+		
+		Note: you must call .start() on this Packetizer to start it
+		listening
+		"""
 
 		self._inBuffer = b''
 		self.packets = queue.Queue()
-		#regex newline transmitted as data
-		self.inputRegex = re.compile(b'\xFF(.)\xAA(.)\xAA\x00', 
-									 re.MULTILINE | re.DOTALL)
 
-		self._conn = _conn
+		self._conn = conn
 
 		self.thread = threading.Thread(
 				target=self.threadRun, 
 				name="Packetizer thread", 
 				daemon=True)
 
+		self.matcher = matcher
+
 	def start(self):
 		self.thread.start()
 
 	#Pure
-	def _tryMatching(reg, buff):
+	def _tryMatching(buff):
 		"""Tries to match reg to the start of buff
 		
 		Returns (match, restOfBuff)
 		If failed to match then returns (None, buff)"""
 
-		m = reg.match(buff)
-		if m:
-			return m.groups(), buff[m.end():]
-		else:
-			return None, buff
 
 	def readData(self):
 		"Reads a small amount of data from the stream, should be called repeatedly"
@@ -75,7 +100,7 @@ class Packetizer():
 		#match as much text as we can, 
 		#put the matching capture groups into the packets queue
 		while True:
-			groups, self._inBuffer = Packetizer._tryMatching(self.inputRegex, self._inBuffer)
+			groups, self._inBuffer = self.matcher(self._inBuffer)
 
 			if groups:
 				self.packets.put(groups)
@@ -108,7 +133,7 @@ class Packetizer():
 		for i in range(Packetizer.MAX_OFFSET_RETRIES):
 			print(self._inBuffer)
 			self._inBuffer = self._inBuffer[1:]
-			groups, self._inBuffer = Packetizer._tryMatching(self.inputRegex, self._inBuffer)
+			groups, self._inBuffer = self.matcher(self._inBuffer)
 			print(self._inBuffer)
 			print('---')
 			if groups:
@@ -125,3 +150,24 @@ class Packetizer():
 			self.readData()
 			self.matchData()
 			time.sleep(Packetizer.THREADED_SLEEP_TIME)
+
+#debugging code
+if __name__ == '__main__':
+	print("Testing Packetizer")
+
+	import serialtools
+	
+	port = serialtools.getPort()
+	conn = serialtools.openSerialConnection(port)
+
+
+	p = Packetizer(conn, OLD_MATCHER)
+	p.start()
+
+	while True:
+		try:
+			print(p.packets.get_nowait())
+		except queue.Empty:
+			time.sleep(0.01)
+			pass
+		

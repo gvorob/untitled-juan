@@ -25,7 +25,7 @@ class SerialIOInterface:
 		portURL = serialtools.getPort()
 		conn = serialtools.openSerialConnection(portURL)
 
-		self._packetizer = packetizer.Packetizer(conn)
+		self._packetizer = packetizer.Packetizer(conn, packetizer.OLD_MATCHER)
 		self._packetizer.start()
 
 		self.buttons = [Button() for i in range(4)]
