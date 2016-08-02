@@ -1,3 +1,4 @@
+
 import serialinterface.serialiointerface as sio
 import time
 import sdltest.sdlaccess as sdl
@@ -23,6 +24,7 @@ def randSign():
 
 
 class State:
+	"dummy class for holding properties"
 	pass
 
 
@@ -126,13 +128,13 @@ def ballOut(side):
 def updateFrame(time):
 	sioInput.lockFrame()
 
-	if(sioInput.buttons[0].state):
+	if(sioInput.digitals[0].value):
 		state.leftPaddle.move(1, time)
-	if(sioInput.buttons[1].state):
+	if(sioInput.digitals[1].value):
 		state.leftPaddle.move(-1, time)
-	if(sioInput.buttons[3].state):
+	if(sioInput.digitals[3].value):
 		state.rightPaddle.move(1, time)
-	if(sioInput.buttons[2].state):
+	if(sioInput.digitals[2].value):
 		state.rightPaddle.move(-1, time)
 
 	
