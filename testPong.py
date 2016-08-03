@@ -5,6 +5,8 @@ import sdltest.sdlaccess as sdl
 import math
 import random
 
+FPS_TARGET = 60
+
 sioInput = sio.SerialIOInterface()
 
 def lerp(a, b, n):
@@ -74,6 +76,9 @@ class Paddle:
 	def move(self, direction, time):
 		self.trackPos += direction * time * Paddle.speed
 		self.trackPos = clamp(self.trackPos, 0, 1)
+	
+	def moveTo(self, position):
+		self.trackPos = position
 
 	def testIntersect(self, ball):
 		"return true if ball should bounce here"
@@ -125,9 +130,7 @@ def ballOut(side):
 	print('ball out: ', str(side))
 	resetBall()
 
-def updateFrame(time):
-	sioInput.lockFrame()
-
+def updateInputDigital(time):
 	if(sioInput.digitals[0].value):
 		state.leftPaddle.move(1, time)
 	if(sioInput.digitals[1].value):
@@ -136,6 +139,17 @@ def updateFrame(time):
 		state.rightPaddle.move(1, time)
 	if(sioInput.digitals[2].value):
 		state.rightPaddle.move(-1, time)
+
+def updateInputAnalog(time):
+	state.leftPaddle.moveTo(1 - sioInput.analogs[0].value)
+	state.rightPaddle.moveTo(1 - sioInput.analogs[1].value)
+
+def updateFrame(time):
+	global numIOFramesPastSecond 
+	numIOFramesPastSecond += sioInput.lockFrame()
+
+	#updateInputDigital(time)
+	updateInputAnalog(time)
 
 	
 	#update ball
@@ -192,20 +206,23 @@ def renderFrame(time):
 
 
 
-
-
-window, renderer = sdl.init(b"Test window please ignore", *consts.windowSize)
-numframes = 0
-
 running = True
-while running:
-	numframes += 1
+
+def tickFrame(time):
+	"""Handle events, update, and render
+
+	time: elapsed time in seconds since last tick"""
+
+	global running
+
+	#print("Getting events...", end='')
 
 	events = sdl.sdl2.ext.get_events()
 	for e in events:
 		if e.type == sdl.SDL_QUIT:
+			print("Quitting")
 			running = False
-			continue
+			return
 		if e.type in (sdl.SDL_MOUSEMOTION, sdl.SDL_MOUSEBUTTONDOWN, sdl.SDL_MOUSEBUTTONUP):
 			#ignore mouseevents
 			break
@@ -213,12 +230,67 @@ while running:
 			print("Unhandled event type " + sdl.eventName[e.type])
 	
 
-	sdl.SDL_SetWindowTitle(window, str(numframes).encode('ascii'))
 
-	time = 20
-	updateFrame(time / 1000)
-	renderFrame(time / 1000)
-	sdl.SDL_Delay(time)
+	#print("Updating...", end='')
+	updateFrame(time)
+
+	#print(" Rendering...", end='')
+	renderFrame(time)
+
+	#print(" Done.")
+
+
+
+
+
+#create window
+window, renderer = sdl.init(b"Test window please ignore", *consts.windowSize)
+
+#framerate 
+frameTimeTarget = 1 / FPS_TARGET
+sdl.SDL_Delay(int(frameTimeTarget * 1000))
+
+#fps counting
+lastFPSSecond = sdl.sdlGetTime()
+numFramesPastSecond = 0
+numIOFramesPastSecond = 0
+frameRate = 0
+ioRate = 0
+
+#absolute frameNumber
+frameNumber = 0
+
+while running:
+	frameNumber += 1
+	numFramesPastSecond += 1
+
+	frameStartTime = sdl.sdlGetTime()
+
+	#Do all the work
+	tickFrame(frameTimeTarget)	
+	if not running:
+		break
+
+	#Calculate how much longer to wait
+	frameEndTime = sdl.sdlGetTime()
+	frameTime = frameEndTime - frameStartTime
+	remainingTime = frameTimeTarget - frameTime
+
+
+	#calculate FPS
+	if frameEndTime > lastFPSSecond + 1:
+		frameRate = numFramesPastSecond
+		ioRate = numIOFramesPastSecond
+		numFramesPastSecond = 0
+		numIOFramesPastSecond = 0
+		lastFPSSecond += 1
+
+	sdl.SDL_SetWindowTitle(window, str("FPS: {:3d} - IOPS: {:3d}".format(frameRate, ioRate)).encode('ascii'))
+
+	if(remainingTime > 0):
+		#print("Delaying..." + str(int(remainingTime * 1000)), end='')
+		sdl.SDL_Delay(int(remainingTime * 1000))
+		#print("Done.")
 	
 print("Exiting")
 

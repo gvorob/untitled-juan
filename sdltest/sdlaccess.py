@@ -76,3 +76,7 @@ def init(name, width, height):
 	renderer = SDL_CreateRenderer(window, -1, 0)
 
 	return window, renderer
+
+def sdlGetTime():
+	"Returns a float timestamp in seconds (only useful relative to other stamps)"
+	return SDL_GetPerformanceCounter() / SDL_GetPerformanceFrequency()

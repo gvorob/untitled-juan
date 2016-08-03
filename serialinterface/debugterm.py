@@ -3,7 +3,7 @@ from . import packetizer
 import queue
 import time
 
-BUFFER_AMOUNT = 8
+BUFFER_AMOUNT = 12
 
 def match(inBuff):
 	if(len(inBuff) < BUFFER_AMOUNT):

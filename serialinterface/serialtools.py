@@ -37,7 +37,7 @@ def getPort():
 	return comport
 
 #TODO: make it time out if no data received after some time
-def openSerialConnection(portURL, timeout=PORT_TIMEOUT):
+def openSerialConnection(portURL, baudrate=115200, timeout=PORT_TIMEOUT):
 	"""Returns a serial.Serial object, waits for data
 	
 	Returns a fileLike Serial object
@@ -50,7 +50,7 @@ def openSerialConnection(portURL, timeout=PORT_TIMEOUT):
 
 	portURL = getPort().device
 	print("Opening connection to port " + portURL)
-	serialConn = serial.Serial(portURL, timeout=PORT_TIMEOUT)
+	serialConn = serial.Serial(portURL, baudrate=baudrate, timeout=PORT_TIMEOUT)
 
 	print("Waiting for data...")
 	while not serialConn.in_waiting:

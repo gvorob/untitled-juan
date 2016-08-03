@@ -11,6 +11,9 @@ import queue
 import time
 import re
 
+ANALOG_MAX = 1023
+
+
 #TODO: generalize framework so buttons aren't hardcoded
 #TODO: add handling for stale frames (i.e. no new input)
 #TODO: make it so that fatal errors in packetizer are actually fatal
@@ -78,8 +81,9 @@ def MATCHER(buffIn):
 	assert(len(analogBytes) % 2 == 0)
 	analogValues = []
 	for i in range(len(analogBytes))[::2]:
-		value = int(analogBytes[i]) * 256 + int(analogBytes[i + 1])
-		analogValues.append(value)
+		intValue = int(analogBytes[i]) * 256 + int(analogBytes[i + 1])
+		floatValue = intValue / ANALOG_MAX
+		analogValues.append(floatValue)
 		
 	
 	result = (digitalBits, analogValues)
@@ -115,7 +119,7 @@ class SerialIOInterface:
 		self._packetizer.start()
 
 		self.digitals = [DigitalIn() for i in range(4)]
-		self.analogs = [AnalogIn() for i in range(2)]
+		self.analogs = [AnalogIn() for i in range(4)]
 
 
 	def lockFrame(self):
@@ -123,19 +127,22 @@ class SerialIOInterface:
 
 		Should be called at the start of every frame
 		Reads buffered data from its packetizer
+
+		Returns number of packets consumed
 		"""
 
-		anyConsumed = False
+		numConsumed = 0
 		#consume all packets until the queue is empty
 		while True:
 			try:
 				p = self._packetizer.packets.get_nowait()
-				anyConsumed = True
+				numConsumed += 1
 				self.consumePacket(p)
 			except queue.Empty:
-				if not anyConsumed:
+				if numConsumed == 0:
 					print("Error: stale frame (in SerialIOInterface)")
 				break
+		return numConsumed
 
 	def consumePacket(self, packet):
 		"""Consume a packet and use it to update its state

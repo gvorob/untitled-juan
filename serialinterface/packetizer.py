@@ -42,7 +42,7 @@ class Packetizer():
 	AMOUNT_TO_READ = 10 
 
 	#How long to sleep between reads
-	THREADED_SLEEP_TIME = 0.01
+	THREADED_SLEEP_TIME = 0.001
 	
 
 	def __init__(self, conn, matcher):
@@ -149,7 +149,7 @@ class Packetizer():
 		while True:
 			self.readData()
 			self.matchData()
-			time.sleep(Packetizer.THREADED_SLEEP_TIME)
+			#time.sleep(Packetizer.THREADED_SLEEP_TIME)
 
 #debugging code
 if __name__ == '__main__':
