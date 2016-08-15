@@ -11,7 +11,8 @@ def match(inBuff):
 
 	beginning, rest = inBuff[:BUFFER_AMOUNT], inBuff[BUFFER_AMOUNT:]
 
-	return beginning.hex(), rest
+	formattedPacket = ' '.join([bytes((b,)).hex() for b in beginning])
+	return (formattedPacket, rest)
 
 
 conn = serialtools.openSerialConnection(serialtools.getPort())
@@ -21,6 +22,7 @@ pack.start()
 
 while True:
 	try:
-		print(pack.packets.get_nowait())
+		in_packets = (pack.packets.get_nowait())
+		print(in_packets)
 	except queue.Empty:
 		time.sleep(0.01)
