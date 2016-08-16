@@ -46,7 +46,7 @@ class Deframer():
 
 		self.thread = threading.Thread(
 				target=self.threadRun, 
-				name="Packetizer thread", 
+				name="Deframer thread", 
 				daemon=True)
 
 

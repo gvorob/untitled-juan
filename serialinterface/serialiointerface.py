@@ -5,7 +5,7 @@ methods to poll the state of a given button frame by frame.
 
 """
 
-from . import packetizer
+from . import deframer
 from . import serialtools
 import queue
 import time
@@ -20,74 +20,6 @@ ANALOG_MAX = 1023
 
 serialRegexFirstPass = re.compile(b"\xA1.(?P<numDigital>.)(?P<numAnalog>.)..*\xA2.*\xA3", re.DOTALL)
 
-def MATCHER(buffIn):
-	"""Matches a packet from buffIn, for Packetizer
-
-	buffIn is a bytes object
-	returns (packetData, restOfBuffIn) if match found
-	returns (None, buffIn) otherwise
-	
-	Packet format is as follows:
-
-	
-	S1 __ ND NA __ [D,...] S2 [AH AL, ...] S3
-
-	where S1-S3 are separators \xA1, \xA2, \xA3
-	__ is any byte (currently unused)
-	ND is the number of digital bits as inputs
-	NA is the number of analog inputs
-	[D, ...] is ceil(ND / 8) bytes containing digital inputs
-	[AH AL,...] is NA pairs of bytes containing analog inputs
-		in the range [0, 1023]
-	"""
-
-	
-	#extract lengths
-	match = serialRegexFirstPass.match(buffIn)
-	if not match:
-		return None, buffIn
-
-
-	#calculate offsets
-	numDigitalBits = int(match.group('numDigital')[0])
-	numDigitalBytes = (numDigitalBits // 8) + 1
-	numAnalogBytes =  int(match.group('numAnalog')[0]) * 2
-
-	firstDigital = 5 #offset
-	firstAnalog = firstDigital + numDigitalBytes + 1 #end of digital + separator
-	totalLength = firstAnalog + numAnalogBytes + 1 #end of analog + terminator
-
-
-	#simple validation
-	inputInvalid = (
-			(len(buffIn) < totalLength) or
-			(buffIn[firstAnalog - 1] != 0xA2) or
-			(buffIn[totalLength - 1] != 0xA3))
-	if inputInvalid:
-		return None, buffIn
-
-
-	#extract binary data
-	digitalBytes = buffIn[firstDigital:firstDigital + numDigitalBytes]
-	analogBytes = buffIn[firstAnalog:firstAnalog + numAnalogBytes]
-
-	digitalBits = []
-	for inByte in digitalBytes:
-		inBits = [bool((inByte >> i)  & 1) for i in range(8)]
-		digitalBits.extend(inBits)
-	digitalBits = digitalBits[:numDigitalBits] #discard excess
-
-	#stitch together analog data
-	assert(len(analogBytes) % 2 == 0)
-	analogValues = []
-	for i in range(len(analogBytes))[::2]:
-		intValue = int(analogBytes[i]) * 256 + int(analogBytes[i + 1])
-		floatValue = intValue / ANALOG_MAX
-		analogValues.append(floatValue)
-		
-	
-	result = (digitalBits, analogValues)
-	return (result, buffIn[totalLength:])
 
 
 
@@ -115,8 +47,8 @@ class SerialIOInterface:
 		portURL = serialtools.getPort()
 		conn = serialtools.openSerialConnection(portURL)
 
-		self._packetizer = packetizer.Packetizer(conn, MATCHER)
-		self._packetizer.start()
+		self._deframer = deframer.Deframer(conn)
+		self._deframer.start()
 
 		self.digitals = [DigitalIn() for i in range(4)]
 		self.analogs = [AnalogIn() for i in range(4)]
@@ -132,25 +64,95 @@ class SerialIOInterface:
 		"""
 
 		numConsumed = 0
-		#consume all packets until the queue is empty
+		#consume all data frames until the queue is empty
 		while True:
 			try:
-				p = self._packetizer.packets.get_nowait()
+				f = self._deframer.frames.get_nowait()
 				numConsumed += 1
-				self.consumePacket(p)
+				self.consumeFrame(f)
 			except queue.Empty:
 				if numConsumed == 0:
 					print("Error: stale frame (in SerialIOInterface)")
 				break
 		return numConsumed
 
-	def consumePacket(self, packet):
-		"""Consume a packet and use it to update its state
+	@classmethod
+	def parseDataFrame(cls, dataFrame):
+		"""Parses a dataframe into digital inputs and analog inputs
+
+		dataFrame is a bytes object
+		returns tuple of ([digital bits], [analog floats])
 		
-		Packets are tuples of capture groups from packetizer regex"""
+		raises valueerror on invalid
+		
+		Packet format is as follows:
+
+		
+		S1 __ ND NA __ [D,...] S2 [AH AL, ...] S3
+
+		where S1-S3 are separators \xA1, \xA2, \xA3
+		__ is any byte (currently unused)
+		ND is the number of digital bits as inputs
+		NA is the number of analog inputs
+		[D, ...] is ceil(ND / 8) bytes containing digital inputs
+		[AH AL,...] is NA pairs of bytes containing analog inputs
+			in the range [0, 1023]
+		"""
+
+		
+		#extract lengths
+		match = serialRegexFirstPass.match(dataFrame)
+		if not match:
+			raise ValueError("Invalid Frame: " + dataFrame.hex())
+
+
+		#calculate offsets
+		numDigitalBits = int(match.group('numDigital')[0])
+		numDigitalBytes = (numDigitalBits // 8) + 1
+		numAnalogBytes =  int(match.group('numAnalog')[0]) * 2
+
+		firstDigital = 5 #offset
+		firstAnalog = firstDigital + numDigitalBytes + 1 #end of digital + separator
+		totalLength = firstAnalog + numAnalogBytes + 1 #end of analog + terminator
+
+
+		#simple validation
+		inputInvalid = (
+				(len(dataFrame) < totalLength) or
+				(dataFrame[firstAnalog - 1] != 0xA2) or
+				(dataFrame[totalLength - 1] != 0xA3))
+		if inputInvalid:
+			raise ValueError("Invalid Frame: " + dataFrame.hex())
+
+
+		#extract binary data
+		digitalBytes = dataFrame[firstDigital:firstDigital + numDigitalBytes]
+		analogBytes = dataFrame[firstAnalog:firstAnalog + numAnalogBytes]
+
+		digitalBits = []
+		for inByte in digitalBytes:
+			inBits = [bool((inByte >> i)  & 1) for i in range(8)]
+			digitalBits.extend(inBits)
+		digitalBits = digitalBits[:numDigitalBits] #discard excess
+
+		#stitch together analog data
+		assert(len(analogBytes) % 2 == 0)
+		analogValues = []
+		for i in range(len(analogBytes))[::2]:
+			intValue = int(analogBytes[i]) * 256 + int(analogBytes[i + 1])
+			floatValue = intValue / ANALOG_MAX
+			analogValues.append(floatValue)
+			
+		
+		result = (digitalBits, analogValues)
+		return result
+
+	def consumeFrame(self, frame):
+		"""Consume a data frame and use it to update its state"""
+		
 		#print("Consuming packet:", packet)
 
-		digitals, analogs = packet
+		digitals, analogs = self.parseDataFrame(frame)
 
 		#set my values to match the packet
 		for i, d in enumerate(digitals):
@@ -172,7 +174,7 @@ if __name__ == '__main__':
 	print("Testing serialiointerface.py")
 
 	#               HDR  ... #D  #A  ... D1-8 SEP A1H A1L A2H A2L CKSM
-	print(MATCHER(b"\xA1\x00\x04\x02\x00\x15\xA2\x00\x00\x03\xFF\xA3"))
+	print(SerialIOInterface.parseDataFrame(b"\xA1\x00\x04\x02\x00\x15\xA2\x00\x00\x03\xFF\xA3"))
 	print("The above should be (([T F T F], [0, 1023]), b'')")
 
 	print("testing it for reals")
