@@ -69,30 +69,70 @@ class Deframer():
 
 
 	def matchData(self):
-		"packetizes as much data as possible from the input buffer"
+		"enqueues any full frames in the input buffer"
 
-		#match as much text as we can, 
-		#put the matching capture groups into the frames queue
+		if(not len(self._inBuffer)):
+			return
+
+		#If framing error
+		if(self._inBuffer[0] != 0):
+			#find next frame
+			indexOfZero = self._inBuffer.find(b'\x00')
+			if(indexOfZero == -1):
+				return
+
+			#if found, move up to it
+			self._inBuffer = self._inBuffer[indexOfZero:]
+
+		#Extract frames
 		while True:
-			#print(self._inBuffer)
-			#we are in sync
-			if(self._inBuffer[0] == 0):
-				match = re.match(b'\x00([^\x00]*)\x00', self._inBuffer)
+			match = re.match(b'\x00([^\x00]*)\x00', self._inBuffer)
+			if not match:
+				break
 
-				if match:
-					self.frames.put(match.group(1))
-					#move up to ending zero
-					self._inBuffer = self._inBuffer[match.end(1):]
-				else:
-					break
-			#if out of sync discard until we see a zero
-			else:
-				#discard data up to zero
-				indexOfZero = self._inBuffer.find(b'\x00')
-				self._inBuffer = self._inBuffer[indexOfZero:]
+			frameData = match.group(1)
+			self.frames.put(self.cobsDecode(frameData))
 
-				#raise IOError("Invalid data received. Hex: {}".format(repr(inbuffer)))
+			#move up to ending zero
+			self._inBuffer = self._inBuffer[match.end(1):]
 
+		#cleanup?
+		pass
+
+	@classmethod
+	def cobsDecode(cls, data):
+		"Decodes a COBS-encoded bytes object. Returns result or raises valueerror"
+		originaldata = data #hold onto original in case of error
+
+		if(len(data) == 0):
+			return b''
+		if(b'\x00' in data):
+			raise ValueError("Found 0 in COBS data")
+
+
+		result = b''
+
+		while len(data) > 0:
+			#pop off the segment length
+			segmentLength = data[0]
+			data = data[1:] 
+
+			#works in general case and in special case
+			dataBytesToRead = segmentLength - 1
+
+			if dataBytesToRead > len(data):
+				remakeData = bytes((segmentLength,)) + data
+				raise ValueError("Invalid COBS string: " + originaldata.hex())
+
+			#read in data
+			result += data[:dataBytesToRead]
+			data = data[dataBytesToRead:]
+
+			#add zero
+			if segmentLength != 0xFF:
+				result += b'\x00'
+
+		return result[:-1] #testing
 	
 	def threadRun(self):
 		"Calls readdata repeatedly, to be run from Thread"
@@ -104,6 +144,7 @@ class Deframer():
 #debugging code
 if __name__ == '__main__':
 	print("Testing Deframer")
+
 
 	import serialtools
 	
