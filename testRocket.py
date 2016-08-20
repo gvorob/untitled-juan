@@ -297,6 +297,8 @@ ioRate = 0
 #absolute frameNumber
 frameNumber = 0
 
+sioInput.waitUntilReady()
+
 while running:
 	frameNumber += 1
 	numFramesPastSecond += 1

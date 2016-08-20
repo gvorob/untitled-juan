@@ -53,6 +53,11 @@ class SerialIOInterface:
 		self.digitals = [DigitalIn() for i in range(4)]
 		self.analogs = [AnalogIn() for i in range(4)]
 
+	def waitUntilReady(self):
+		print("Waiting for serialIOInterface to be ready")
+		while not self._deframer.isReady():
+			time.sleep(0.01)
+		print("Done")
 
 	def lockFrame(self):
 		"""Makes state consistent for a frame
@@ -179,8 +184,11 @@ if __name__ == '__main__':
 
 	print("testing it for reals")
 	s = SerialIOInterface()
+	s.waitUntilReady()
 
 	while True:
 		s.lockFrame()
 		print(str(s))
+		print("bad frames: ", s._deframer.badFrames)
+		print("time since last frame: ", time.time() - s._deframer.lastValidFrameTime)
 		time.sleep(0.2)

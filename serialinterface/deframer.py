@@ -28,6 +28,7 @@ class Deframer():
 	#How long to sleep between reads
 	THREADED_SLEEP_TIME = 0.001 
 	
+	INITIAL_FRAMES_TO_DISCARD = 3
 
 	def __init__(self, conn):
 		"""Initializes deframer
@@ -49,6 +50,14 @@ class Deframer():
 				name="Deframer thread", 
 				daemon=True)
 
+		self.lastValidFrameTime = -1
+		self.framesDiscarded = 0
+		self.goodFrames = 0
+		self.badFrames = 0
+
+
+	def isReady(self):
+		return self.goodFrames > self.INITIAL_FRAMES_TO_DISCARD
 
 	def start(self):
 		self.thread.start()
@@ -91,7 +100,20 @@ class Deframer():
 				break
 
 			frameData = match.group(1)
-			self.frames.put(self.cobsDecode(frameData))
+			try:
+				decodedFrame = self.cobsDecode(frameData)
+
+				self.lastValidFrameTime = time.time()
+				self.goodFrames += 1
+
+				if self.framesDiscarded < self.INITIAL_FRAMES_TO_DISCARD:
+					self.framesDiscarded += 1
+				else:
+					self.frames.put(decodedFrame)
+			except ValueError:
+				print("Caught bad frame")
+				self.badFrames += 1
+				pass
 
 			#move up to ending zero
 			self._inBuffer = self._inBuffer[match.end(1):]
